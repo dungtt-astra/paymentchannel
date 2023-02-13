@@ -1,6 +1,5 @@
 //
 // machine_mock_test.go
-// Copyright (C) 2020 Toran Sahu <toran.sahu@yahoo.com>
 //
 // Distributed under terms of the MIT license.
 //
@@ -9,6 +8,7 @@ package mock_machine_test
 
 import (
 	context "context"
+	machine "github.com/dungtt-astra/paymentchannel/machine"
 	"log"
 	"testing"
 	"time"
