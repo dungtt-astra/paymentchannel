@@ -10,6 +10,7 @@ import (
 	"context"
 	"flag"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
+	data "github.com/dungtt-astra/paymentchannel/utils/data"
 	structpb "github.com/golang/protobuf/ptypes/struct"
 	"io"
 	"log"
@@ -47,50 +48,32 @@ func connect() (machine.Machine_ExecuteClient, *grpc.ClientConn, error) {
 	return stream, conn, err
 }
 
-type msg_ReqOpen struct {
-	Version        string
-	Account_Name   string
-	Address        string  // account address
-	Deposit_Amount float64 // sdk.Coin {denom: string, amount: Int}
-	Deposit_Denom  string
-	Hashcode       string
-	MinCoin        uint16 // minimum transfer on this channel
-}
+//type msg_ReqOpen struct {
+//	Version        string
+//	Account_Name   string
+//	Address        string  // account address
+//	Deposit_Amount float64 // sdk.Coin {denom: string, amount: Int}
+//	Deposit_Denom  string
+//	Hashcode       string
+//	MinCoin        uint16 // minimum transfer on this channel
+//}
 
-func openChannel(stream machine.Machine_ExecuteClient, reqOpenMsg msg_ReqOpen) error {
+func openChannel(stream machine.Machine_ExecuteClient, reqOpenMsg data.msg_ReqOpen) error {
 
 	var item1 = &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"version": &structpb.Value{
-				Kind: &structpb.Value_StringValue{
-					reqOpenMsg.Version,
-				},
-			},
-			"account_name": &structpb.Value{
-				Kind: &structpb.Value_StringValue{
-					reqOpenMsg.Account_Name,
-				},
-			},
-			"address": &structpb.Value{
-				Kind: &structpb.Value_StringValue{
-					reqOpenMsg.Address,
-				},
-			},
-			"deposit_amount": &structpb.Value{
-				Kind: &structpb.Value_NumberValue{
-					reqOpenMsg.Deposit_Amount,
-				},
-			},
-			"deposit_denom": &structpb.Value{
-				Kind: &structpb.Value_StringValue{
-					reqOpenMsg.Deposit_Denom,
-				},
-			},
-			"hashcode": &structpb.Value{
-				Kind: &structpb.Value_StringValue{
-					reqOpenMsg.Hashcode,
-				},
-			},
+			"version": &structpb.Value{Kind: &structpb.Value_StringValue{
+				reqOpenMsg.Version}},
+			"account_name": &structpb.Value{Kind: &structpb.Value_StringValue{
+				reqOpenMsg.Account_Name}},
+			"address": &structpb.Value{Kind: &structpb.Value_StringValue{
+				reqOpenMsg.Address}},
+			"deposit_amount": &structpb.Value{Kind: &structpb.Value_NumberValue{
+				reqOpenMsg.Deposit_Amount}},
+			"deposit_denom": &structpb.Value{Kind: &structpb.Value_StringValue{
+				reqOpenMsg.Deposit_Denom}},
+			"hashcode": &structpb.Value{Kind: &structpb.Value_StringValue{
+				reqOpenMsg.Hashcode}},
 		},
 	}
 
@@ -133,7 +116,7 @@ func main() {
 
 	go messageHandler(stream)
 
-	var req_open_msg = msg_ReqOpen{
+	var req_open_msg = data.msg_ReqOpen{
 		Version:        "0.1",
 		Account_Name:   "Alice",
 		Address:        "string", // account address
