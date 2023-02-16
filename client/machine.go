@@ -47,24 +47,54 @@ func connect() (machine.Machine_ExecuteClient, *grpc.ClientConn, error) {
 	return stream, conn, err
 }
 
-func openChannel(stream machine.Machine_ExecuteClient) error {
+type msg_ReqOpen struct {
+	Version        string
+	Account_Name   string
+	Address        string  // account address
+	Deposit_Amount float64 // sdk.Coin {denom: string, amount: Int}
+	Deposit_Denom  string
+	Hashcode       string
+	MinCoin        uint16 // minimum transfer on this channel
+}
+
+func openChannel(stream machine.Machine_ExecuteClient, reqOpenMsg msg_ReqOpen) error {
 
 	var item1 = &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"name": &structpb.Value{
+			"version": &structpb.Value{
 				Kind: &structpb.Value_StringValue{
-					"Anuj1",
+					reqOpenMsg.Version,
 				},
 			},
-			"age": &structpb.Value{
+			"account_name": &structpb.Value{
+				Kind: &structpb.Value_StringValue{
+					reqOpenMsg.Account_Name,
+				},
+			},
+			"address": &structpb.Value{
+				Kind: &structpb.Value_StringValue{
+					reqOpenMsg.Address,
+				},
+			},
+			"deposit_amount": &structpb.Value{
 				Kind: &structpb.Value_NumberValue{
-					10,
+					reqOpenMsg.Deposit_Amount,
+				},
+			},
+			"deposit_denom": &structpb.Value{
+				Kind: &structpb.Value_StringValue{
+					reqOpenMsg.Deposit_Denom,
+				},
+			},
+			"hashcode": &structpb.Value{
+				Kind: &structpb.Value_StringValue{
+					reqOpenMsg.Hashcode,
 				},
 			},
 		},
 	}
 
-	instruct := machine.Instruction{Cmd: "OPENCHANNEL", Data: item1}
+	instruct := machine.Instruction{Cmd: "REQ_OPENCHANNEL", Data: item1}
 
 	log.Println("ReqOpenChannel")
 	if err := stream.Send(&instruct); err != nil {
@@ -75,45 +105,7 @@ func openChannel(stream machine.Machine_ExecuteClient) error {
 	return nil
 }
 
-func runExecute(client machine.MachineClient, instructions []*machine.Instruction) {
-	log.Printf("Streaming %v", instructions)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	stream, err := client.Execute(ctx)
-	if err != nil {
-		log.Fatalf("%v.Execute(ctx) = %v, %v: ", client, stream, err)
-	}
-	//waitc := make(chan struct{})
-
-	go func() {
-		for {
-			result, err := stream.Recv()
-			if err == io.EOF {
-				log.Println("EOF")
-				close(waitc)
-				return
-			}
-			if err != nil {
-				log.Printf("Err: %v", err)
-			}
-			log.Printf("output: %v", result.GetOutput())
-		}
-	}()
-
-	for _, instruction := range instructions {
-		if err := stream.Send(instruction); err != nil {
-			log.Fatalf("%v.Send(%v) = %v: ", stream, instruction, err)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if err := stream.CloseSend(); err != nil {
-		log.Fatalf("%v.CloseSend() got error %v, want %v", stream, err, nil)
-	}
-
-	<-waitc
-}
-
-func listen(stream machine.Machine_ExecuteClient) {
+func messageHandler(stream machine.Machine_ExecuteClient) {
 	for {
 		result, err := stream.Recv()
 		if err == io.EOF {
@@ -139,11 +131,20 @@ func main() {
 		return
 	}
 
-	go listen(stream)
+	go messageHandler(stream)
 
-	openChannel(stream)
+	var req_open_msg = msg_ReqOpen{
+		Version:        "0.1",
+		Account_Name:   "Alice",
+		Address:        "string", // account address
+		Deposit_Amount: 5,        // sdk.Coin {denom: string, amount: Int}
+		Deposit_Denom:  "astra",
+		Hashcode:       "abcd",
+		MinCoin:        1,
+	}
+	openChannel(stream, req_open_msg)
 
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	if err := stream.CloseSend(); err != nil {
 		log.Fatalf("%v.CloseSend() got error %v, want %v", stream, err, nil)

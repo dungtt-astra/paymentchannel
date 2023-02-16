@@ -9,8 +9,6 @@ service Machine {
 }
 
 message Instruction {
-//    string operator = 1;
-//    int32 operand = 2;
     string cmd = 1;
     google.protobuf.Struct data = 2;
 }

@@ -19,12 +19,12 @@ import (
 type CmdType string
 
 const (
-	OPENCHANNEL CmdType = "OPENCHANNEL"
-	POP                 = "POP"
-	ADD                 = "ADD"
-	SUB                 = "SUB"
-	MUL                 = "MUL"
-	DIV                 = "DIV"
+	REQ_OPENCHANNEL CmdType = "REQ_OPENCHANNEL"
+	POP                     = "POP"
+	ADD                     = "ADD"
+	SUB                     = "SUB"
+	MUL                     = "MUL"
+	DIV                     = "DIV"
 )
 
 type MachineServer struct {
@@ -60,10 +60,12 @@ func eventHandler(stream machine.Machine_ExecuteServer, waitc chan bool) {
 		fmt.Printf("cmd: %v, data: %v\n", cmd, data)
 
 		switch cmd_type {
-		case OPENCHANNEL:
+		case REQ_OPENCHANNEL:
 			//log.Println("AcceptOpenChannel: name %v, ", data.Fields["name"].GetStringValue())
-			fmt.Printf("AcceptOpenChannel: name %v, age %v \n", data.Fields["name"].GetStringValue(),
-				data.Fields["age"].GetNumberValue())
+			fmt.Printf("AcceptOpenChannel: version %v, account %v, amt %v \n",
+				data.Fields["version"].GetStringValue(),
+				data.Fields["account_name"].GetStringValue(),
+				data.Fields["deposit_amount"].GetNumberValue())
 
 		case POP:
 		case ADD, SUB, MUL, DIV:
