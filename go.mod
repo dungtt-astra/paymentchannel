@@ -3,8 +3,10 @@ module github.com/dungtt-astra/paymentchannel
 go 1.14
 
 require (
+	github.com/ethereum/go-ethereum v1.11.1 // indirect
 	github.com/golang/mock v1.6.0
 	github.com/golang/protobuf v1.5.2 // github.com/toransahu/grpc-eg-go v0.0.0-20210218054324-95afc5b5d158
+	github.com/tendermint/tendermint v0.35.9 // indirect
 	github.com/toransahu/grpc-eg-go v0.0.0-20210218054324-95afc5b5d158
 	golang.org/x/net v0.6.0 // indirect
 	google.golang.org/genproto v0.0.0-20230209215440-0dfe4f8abfcc // indirect
