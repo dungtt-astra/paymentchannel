@@ -7,8 +7,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	cryptoTypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/m25-lab/lightning-network-node/core_chain_sdk/account"
-	"github.com/m25-lab/lightning-network-node/core_chain_sdk/common"
+	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
+	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/common"
 	"github.com/pkg/errors"
 )
 

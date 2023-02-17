@@ -92,6 +92,7 @@ func (s *MachineServer) handleReqOpenChannel(stream machine.Machine_ExecuteServe
 			Amount: sdk.NewInt(1000000000000000000),
 		},
 		multisigAddr,
+		"",
 	)
 
 	openChannelRequest := channel.SignMsgRequest{
