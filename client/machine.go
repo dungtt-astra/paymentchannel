@@ -10,13 +10,14 @@ import (
 	"context"
 	"flag"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
+	util "github.com/dungtt-astra/paymentchannel/utils"
 	data "github.com/dungtt-astra/paymentchannel/utils/data"
 	structpb "github.com/golang/protobuf/ptypes/struct"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"io"
 	"log"
 	"time"
-
-	"google.golang.org/grpc"
 )
 
 var (
@@ -80,7 +81,7 @@ func openChannel(stream machine.Machine_ExecuteClient, reqOpenMsg data.Msg_ReqOp
 
 func messageHandler(stream machine.Machine_ExecuteClient) {
 	for {
-		result, err := stream.Recv()
+		msg, err := stream.Recv()
 		if err == io.EOF {
 			log.Println("EOF")
 			close(waitc)
@@ -91,7 +92,27 @@ func messageHandler(stream machine.Machine_ExecuteClient) {
 			close(waitc)
 			return
 		}
-		log.Printf("output: %v", result.GetOutput())
+		log.Printf("output: %v", msg.String())
+
+		cmd := msg.GetCmd()
+		data := msg.GetData()
+		cmd_type := util.CmdType(cmd)
+
+		switch cmd_type {
+		case util.REP_OPENCHANNEL:
+			log.Println("reply openchannel msg")
+			log.Println("partner_addr:", data.Fields["account_addr"].GetStringValue())
+			log.Println("strSig:", data.Fields["sig_str"].GetStringValue())
+
+		case util.POP:
+		default:
+			close(waitc)
+			//return status.Errorf(codes.Unimplemented, "Operation '%s' not implemented yet", operator)
+			log.Println(codes.Unimplemented, "Operation '%s' not implemented yet", cmd)
+
+			return
+		}
+
 	}
 }
 

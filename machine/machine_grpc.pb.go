@@ -44,7 +44,7 @@ func (c *machineClient) Execute(ctx context.Context, opts ...grpc.CallOption) (M
 
 type Machine_ExecuteClient interface {
 	Send(*Instruction) error
-	Recv() (*Result, error)
+	Recv() (*Instruction, error)
 	grpc.ClientStream
 }
 
@@ -56,8 +56,8 @@ func (x *machineExecuteClient) Send(m *Instruction) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *machineExecuteClient) Recv() (*Result, error) {
-	m := new(Result)
+func (x *machineExecuteClient) Recv() (*Instruction, error) {
+	m := new(Instruction)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func _Machine_Execute_Handler(srv interface{}, stream grpc.ServerStream) error {
 }
 
 type Machine_ExecuteServer interface {
-	Send(*Result) error
+	Send(*Instruction) error
 	Recv() (*Instruction, error)
 	grpc.ServerStream
 }
@@ -106,7 +106,7 @@ type machineExecuteServer struct {
 	grpc.ServerStream
 }
 
-func (x *machineExecuteServer) Send(m *Result) error {
+func (x *machineExecuteServer) Send(m *Instruction) error {
 	return x.ServerStream.SendMsg(m)
 }
 

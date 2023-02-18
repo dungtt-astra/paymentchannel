@@ -9,28 +9,17 @@ package server
 import (
 	"errors"
 	"fmt"
+	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/channel"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
+	util "github.com/dungtt-astra/paymentchannel/utils"
 	"google.golang.org/grpc/codes"
-	"io"
-	"log"
-
-	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/grpc/peer"
 	structpb "google.golang.org/protobuf/types/known/structpb"
-)
-
-type CmdType string
-
-const (
-	REQ_OPENCHANNEL CmdType = "REQ_OPENCHANNEL"
-	POP                     = "POP"
-	ADD                     = "ADD"
-	SUB                     = "SUB"
-	MUL                     = "MUL"
-	DIV                     = "DIV"
+	"io"
+	"log"
 )
 
 type MachineServer struct {
@@ -44,7 +33,7 @@ type conn struct {
 
 var thiscon [2]conn
 var server MachineServer
-var this_pubkey = "abc"
+var mmemonic = "excuse quiz oyster vendor often spray day vanish slice topic pudding crew promote floor shadow best subway slush slender good merit hollow certain repeat"
 
 // var waitc = make(chan struct{})
 func (s *MachineServer) validateReqOpenChannelData(data *structpb.Struct) error {
@@ -60,8 +49,35 @@ func (s *MachineServer) validateReqOpenChannelData(data *structpb.Struct) error 
 	return nil
 }
 
-func (s *MachineServer) sendRepOpenChannel(stream machine.Machine_ExecuteServer, msg sdk.Msg, strSig string) error {
-	//stream.
+func (s *MachineServer) sendRepOpenChannel(stream machine.Machine_ExecuteServer, msg *channelTypes.MsgOpenChannel, strSig string) error {
+
+	hashcode := "abc"
+	var item = &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"account_addr": &structpb.Value{Kind: &structpb.Value_StringValue{
+				msg.PartA}},
+			"multisig_addr": &structpb.Value{Kind: &structpb.Value_StringValue{
+				msg.MultisigAddr}},
+			//"publickey": &structpb.Value{Kind: &structpb.Value_StringValue{
+			//	reqOpenMsg.Publickey}},
+			"deposit_amount": &structpb.Value{Kind: &structpb.Value_NumberValue{
+				float64(msg.CoinA.Amount.Int64())}},
+			"deposit_denom": &structpb.Value{Kind: &structpb.Value_StringValue{
+				msg.CoinA.Denom}},
+			"hashcode": &structpb.Value{Kind: &structpb.Value_StringValue{
+				hashcode}},
+			"sig_str": &structpb.Value{Kind: &structpb.Value_StringValue{
+				strSig}},
+		},
+	}
+
+	instruct := machine.Instruction{Cmd: "REP_OPENCHANNEL", Data: item}
+
+	log.Println("RepOpenChannel")
+	if err := stream.Send(&instruct); err != nil {
+		log.Fatalf("%v.Send(%v) = %v: ", stream, instruct, err)
+		return err
+	}
 	return nil
 }
 
@@ -73,8 +89,7 @@ func (s *MachineServer) handleReqOpenChannel(stream machine.Machine_ExecuteServe
 	}
 
 	peerAccount := account.NewPKAccount(data.Fields["publickey"].GetStringValue())
-	thisAccount := account.NewPKAccount(this_pubkey)
-
+	thisAccount, _ := account.NewAccount().ImportAccount(mmemonic)
 	//@todo create multi account
 	acc := account.NewAccount()
 	multisigAddr, multiSigPubkey, _ := acc.CreateMulSigAccountFromTwoAccount(thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
@@ -102,14 +117,13 @@ func (s *MachineServer) handleReqOpenChannel(stream machine.Machine_ExecuteServe
 	}
 
 	//channelClient := client.NewChannelClient()
-
-	strSig, err := channel.SignMultisigTxFromOneAccount(openChannelRequest, thisAccount, multiSigPubkey)
+	strSig, err := channel.NewChannel().SignMultisigTxFromOneAccount(openChannelRequest, thisAccount, multiSigPubkey)
 	if err != nil {
 		panic(err)
 	}
 
 	log.Println(strSig)
-	//s.sendRepOpenChannel(stream, Msg, strSig)
+	s.sendRepOpenChannel(stream, msg, strSig)
 }
 
 func eventHandler(stream machine.Machine_ExecuteServer, waitc chan bool) {
@@ -127,18 +141,17 @@ func eventHandler(stream machine.Machine_ExecuteServer, waitc chan bool) {
 
 		cmd := instruction.GetCmd()
 		data := instruction.GetData()
-		cmd_type := CmdType(cmd)
+		cmd_type := util.CmdType(cmd)
 
 		fmt.Printf("cmd: %v, data: %v\n", cmd, data)
 
 		switch cmd_type {
-		case REQ_OPENCHANNEL:
+		case util.REQ_OPENCHANNEL:
 			server.handleReqOpenChannel(stream, data)
 			//log.Println("AcceptOpenChannel: name %v, ", data.Fields["name"].GetStringValue())
 
-		case POP:
-		case ADD, SUB, MUL, DIV:
-			fmt.Printf("!!!")
+		case util.POP:
+
 		default:
 			close(waitc)
 			//return status.Errorf(codes.Unimplemented, "Operation '%s' not implemented yet", operator)
