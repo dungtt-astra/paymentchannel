@@ -9,12 +9,15 @@ package server
 import (
 	"errors"
 	"fmt"
+	"github.com/AstraProtocol/channel/app"
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
+	"github.com/cosmos/cosmos-sdk/client"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/channel"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
 	util "github.com/dungtt-astra/paymentchannel/utils"
+	"github.com/evmos/ethermint/encoding"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -117,7 +120,13 @@ func (s *MachineServer) handleReqOpenChannel(stream machine.Machine_ExecuteServe
 	}
 
 	//channelClient := client.NewChannelClient()
-	strSig, err := channel.NewChannel().SignMultisigTxFromOneAccount(openChannelRequest, thisAccount, multiSigPubkey)
+	rpcClient := client.Context{}
+	encodingConfig := encoding.MakeConfig(app.ModuleBasics)
+	rpcClient.WithChainID("astra_11110-1").WithTxConfig(encodingConfig.TxConfig)
+
+	//channelClient := client.NewChannelClient()
+	strSig, err := channel.NewChannel(rpcClient).SignMultisigTxFromOneAccount(openChannelRequest, thisAccount, multiSigPubkey)
+
 	if err != nil {
 		panic(err)
 	}
