@@ -87,6 +87,10 @@ func TxBuilderSignatureJsonEncoder(txConfig client.TxConfig, tx client.TxBuilder
 	return string(json), nil
 }
 
+func TxBuilderSignatureJsonDecoder(txConfig client.TxConfig, txJson string) ([]signingTypes.SignatureV2, error) {
+	return txConfig.UnmarshalSignatureJSON([]byte(txJson))
+}
+
 func SignatureJsonDecoder(txConfig client.TxConfig, txJson string) ([]signingTypes.SignatureV2, error) {
 	return txConfig.UnmarshalSignatureJSON([]byte(txJson))
 }

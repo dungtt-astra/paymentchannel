@@ -132,7 +132,74 @@ func (t *TxMulSign) SignTxWithSignerAddress(txBuilder client.TxBuilder, multiSig
 	return nil
 }
 
+func NewTxMulSign(rpcClient client.Context, privateKey *account.PrivateKeySerialized, gasLimit uint64, gasPrice string, sequenNum, accNum uint64) *TxMulSign {
+	txf := tx.Factory{}.
+		WithChainID(rpcClient.ChainID).
+		WithTxConfig(rpcClient.TxConfig).
+		WithGasPrices(gasPrice).
+		WithGas(gasLimit).
+		WithSequence(sequenNum).
+		WithAccountNumber(accNum).
+		WithSignMode(signing.SignMode_SIGN_MODE_LEGACY_AMINO_JSON)
+	//.SetTimeoutHeight(txf.TimeoutHeight())
+
+	return &TxMulSign{txf: txf, signerPrivateKey: privateKey, rpcClient: rpcClient}
+}
+
 func (t *TxMulSign) GenerateMultisig(txBuilder client.TxBuilder, multiSignAccPubKey cryptoTypes.PubKey, signOfSigner [][]signing.SignatureV2) error {
+	err := t.prepareSignTx(multiSignAccPubKey)
+	if err != nil {
+		return errors.Wrap(err, "prepareSignTx")
+	}
+
+	multisigPub, ok := multiSignAccPubKey.(*keyMultisig.LegacyAminoPubKey)
+	if !ok {
+		return errors.Wrap(errors.New("set type error"), "LegacyAminoPubKey")
+	}
+
+	multisigSig := multisig.NewMultisig(len(multisigPub.PubKeys))
+
+	for _, v2s := range signOfSigner {
+		signingData := authSigning.SignerData{
+			ChainID:       t.txf.ChainID(),
+			AccountNumber: t.txf.AccountNumber(),
+			Sequence:      t.txf.Sequence(),
+		}
+
+		for _, sig := range v2s {
+			err = authSigning.VerifySignature(
+				sig.PubKey,
+				signingData,
+				sig.Data,
+				t.rpcClient.TxConfig.SignModeHandler(),
+				txBuilder.GetTx())
+
+			if err != nil {
+				addr := types.AccAddress(sig.PubKey.Address())
+				return fmt.Errorf("couldn't verify signature for address %s. error = %v", addr.String(), err.Error())
+			}
+
+			if err := multisig.AddSignatureV2(multisigSig, sig, multisigPub.GetPubKeys()); err != nil {
+				return errors.Wrap(err, "AddSignatureV2")
+			}
+		}
+	}
+
+	sigV2 := signing.SignatureV2{
+		PubKey:   multisigPub,
+		Data:     multisigSig,
+		Sequence: t.txf.Sequence(),
+	}
+
+	err = txBuilder.SetSignatures(sigV2)
+	if err != nil {
+		return errors.Wrap(err, "SetSignatures")
+	}
+
+	return nil
+}
+
+func (t *TxMulSign) CreateTxMulSign(txBuilder client.TxBuilder, multiSignAccPubKey cryptoTypes.PubKey, coinType uint32, signOfSigner [][]signing.SignatureV2) error {
 	err := t.prepareSignTx(multiSignAccPubKey)
 	if err != nil {
 		return errors.Wrap(err, "prepareSignTx")

@@ -6,12 +6,25 @@
 
 package main
 
+import "C"
 import (
 	"context"
 	"flag"
+	"fmt"
+	"github.com/AstraProtocol/channel/app"
+	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
+	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/flags"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
+	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/channel"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
 	util "github.com/dungtt-astra/paymentchannel/utils"
+	"github.com/dungtt-astra/paymentchannel/utils/config"
 	data "github.com/dungtt-astra/paymentchannel/utils/data"
+	"github.com/dungtt-astra/paymentchannel/utils/field"
+	"github.com/evmos/ethermint/encoding"
 	structpb "github.com/golang/protobuf/ptypes/struct"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -24,9 +37,90 @@ var (
 	serverAddr = flag.String("server_addr", "localhost:9111", "The server address in the format of host:port")
 )
 
+type MachineClient struct {
+	//machine.UnimplementedMachineClient
+	stream   machine.Machine_ExecuteClient
+	account  *account.PrivateKeySerialized
+	denom    string
+	amount   int64
+	version  string
+	acc_name string
+	channel  data.Msg_Channel
+	cn       *channel.Channel
+}
+
+var mmemonic = "antenna guard panda arena drill ankle episode render veteran artist simple clerk seminar math cruise speed vacuum visa hen surround impulse ivory special pet"
+
 var waitc = make(chan struct{})
 
-func connect() (machine.Machine_ExecuteClient, *grpc.ClientConn, error) {
+var cfg = &config.Config{
+	ChainId:       "astra_11110-1",
+	Endpoint:      "http://128.199.238.171:26657",
+	CoinType:      60,
+	PrefixAddress: "astra",
+	TokenSymbol:   "aastra",
+}
+
+func (c *MachineClient) Init(stream machine.Machine_ExecuteClient) {
+	c.stream = stream
+	c.acc_name = "Alice"
+	c.denom = "aastra"
+	c.amount = 0
+	c.version = "0.1"
+
+	// set astra address
+	sdkConfig := sdk.GetConfig()
+	sdkConfig.SetPurpose(44)
+
+	bech32PrefixAccAddr := fmt.Sprintf("%v", cfg.PrefixAddress)
+	bech32PrefixAccPub := fmt.Sprintf("%vpub", cfg.PrefixAddress)
+	sdkConfig.SetBech32PrefixForAccount(bech32PrefixAccAddr, bech32PrefixAccPub)
+
+	acc, err := account.NewAccount().ImportAccount(mmemonic)
+	if err != nil {
+		log.Println("ImportAccount Err:", err.Error())
+		return
+	}
+
+	c.account = acc
+
+	c.channel = data.Msg_Channel{
+		Index:         "",
+		Multisig_Addr: "",
+		PartA:         "",
+		PartB:         c.account.AccAddress().String(),
+		Denom:         c.denom,
+		Amount_partA:  0,
+		Amount_partB:  float64(c.amount),
+		PubkeyA:       c.account.PublicKey().String(),
+		PubkeyB:       "",
+	}
+
+	//
+	rpcClient := client.Context{}
+	encodingConfig := encoding.MakeConfig(app.ModuleBasics)
+
+	rpcHttp, err := client.NewClientFromNode(cfg.Endpoint)
+	if err != nil {
+		panic(err)
+	}
+
+	rpcClient = rpcClient.
+		WithClient(rpcHttp).
+		//WithNodeURI(c.endpoint).
+		WithCodec(encodingConfig.Marshaler).
+		WithInterfaceRegistry(encodingConfig.InterfaceRegistry).
+		WithTxConfig(encodingConfig.TxConfig).
+		WithLegacyAmino(encodingConfig.Amino).
+		WithChainID(cfg.ChainId).
+		WithAccountRetriever(authTypes.AccountRetriever{}).
+		WithBroadcastMode(flags.BroadcastSync).
+		WithTxConfig(encodingConfig.TxConfig)
+
+	c.cn = channel.NewChannel(rpcClient)
+}
+
+func connect(serverAddr *string) (machine.Machine_ExecuteClient, *grpc.ClientConn, error) {
 	flag.Parse()
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure())
@@ -49,21 +143,31 @@ func connect() (machine.Machine_ExecuteClient, *grpc.ClientConn, error) {
 	return stream, conn, err
 }
 
-func openChannel(stream machine.Machine_ExecuteClient, reqOpenMsg data.Msg_ReqOpen) error {
+func (c *MachineClient) openChannel() error {
+
+	var reqOpenMsg = data.Msg_ReqOpen{
+		Version:        c.version,
+		Account_Name:   c.acc_name,
+		Publickey:      c.account.PublicKey().String(),
+		Deposit_Amount: 0,
+		Deposit_Denom:  c.denom,
+		Hashcode:       "abcd",
+		MinCoin:        1,
+	}
 
 	var item1 = &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"version": &structpb.Value{Kind: &structpb.Value_StringValue{
+			field.Version: &structpb.Value{Kind: &structpb.Value_StringValue{
 				reqOpenMsg.Version}},
-			"account_name": &structpb.Value{Kind: &structpb.Value_StringValue{
+			field.Account_name: &structpb.Value{Kind: &structpb.Value_StringValue{
 				reqOpenMsg.Account_Name}},
-			"publickey": &structpb.Value{Kind: &structpb.Value_StringValue{
+			field.Public_key: &structpb.Value{Kind: &structpb.Value_StringValue{
 				reqOpenMsg.Publickey}},
-			"deposit_amount": &structpb.Value{Kind: &structpb.Value_NumberValue{
-				reqOpenMsg.Deposit_Amount}},
-			"deposit_denom": &structpb.Value{Kind: &structpb.Value_StringValue{
+			field.Deposit_denom: &structpb.Value{Kind: &structpb.Value_StringValue{
 				reqOpenMsg.Deposit_Denom}},
-			"hashcode": &structpb.Value{Kind: &structpb.Value_StringValue{
+			field.Deposit_amount: &structpb.Value{Kind: &structpb.Value_NumberValue{
+				reqOpenMsg.Deposit_Amount}},
+			field.Hashcode: &structpb.Value{Kind: &structpb.Value_StringValue{
 				reqOpenMsg.Hashcode}},
 		},
 	}
@@ -71,17 +175,84 @@ func openChannel(stream machine.Machine_ExecuteClient, reqOpenMsg data.Msg_ReqOp
 	instruct := machine.Instruction{Cmd: "REQ_OPENCHANNEL", Data: item1}
 
 	log.Println("ReqOpenChannel")
-	if err := stream.Send(&instruct); err != nil {
-		log.Fatalf("%v.Send(%v) = %v: ", stream, instruct, err)
+	if err := c.stream.Send(&instruct); err != nil {
+		log.Fatalf("%v.Send(%v) = %v: ", c.stream, instruct, err)
 		return err
 	}
 
 	return nil
 }
 
-func messageHandler(stream machine.Machine_ExecuteClient) {
+func (s *MachineClient) doConfirmOpenChannel(strSig string) error {
+
+	//hashcode := "abc"
+	var item = &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"sig_str": &structpb.Value{Kind: &structpb.Value_StringValue{
+				strSig}},
+		},
+	}
+
+	instruct := machine.Instruction{Cmd: "CONFIRM_OPENCHANNEL", Data: item}
+
+	log.Println("RepOpenChannel")
+	if err := s.stream.Send(&instruct); err != nil {
+		log.Fatalf("%v.Send(%v) = %v: ", s.stream, instruct, err)
+		return err
+	}
+	return nil
+}
+
+func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
+
+	c.channel.Multisig_Addr = data.Fields[field.Multisig_addr].GetStringValue()
+	c.channel.PartA = data.Fields[field.PartA_addr].GetStringValue()
+	c.channel.PartB = c.account.AccAddress().String()
+	c.channel.PubkeyB = data.Fields[field.Public_key].GetStringValue()
+
+	multisigAccount, err := account.NewPKAccount(data.Fields[field.Multisig_pubkey].GetStringValue())
+	if err != nil {
+		log.Println("NewPKAccount Err:", err.Error())
+		return err
+	}
+
+	msg := channelTypes.NewMsgOpenChannel(
+		c.channel.Multisig_Addr,
+		c.channel.PartA,
+		c.channel.PartB,
+		&sdk.Coin{
+			Denom:  c.channel.Denom,
+			Amount: sdk.NewInt(int64(data.Fields[field.Deposit_amount].GetNumberValue())),
+		},
+		&sdk.Coin{
+			Denom:  c.channel.Denom,
+			Amount: sdk.NewInt(c.amount),
+		},
+		c.channel.Multisig_Addr,
+	)
+
+	openChannelRequest := channel.SignMsgRequest{
+		Msg:      msg,
+		GasLimit: 200000,
+		GasPrice: "25aastra",
+	}
+
+	strSig, err := c.cn.SignMultisigTxFromOneAccount(openChannelRequest, c.account, multisigAccount.PublicKey())
+
+	if err != nil {
+		panic(err)
+		return err
+	}
+
+	log.Println("strSig: %v", strSig)
+
+	c.doConfirmOpenChannel(strSig)
+	return nil
+}
+
+func eventHandler(c *MachineClient) {
 	for {
-		msg, err := stream.Recv()
+		msg, err := c.stream.Recv()
 		if err == io.EOF {
 			log.Println("EOF")
 			close(waitc)
@@ -100,11 +271,14 @@ func messageHandler(stream machine.Machine_ExecuteClient) {
 
 		switch cmd_type {
 		case util.REP_OPENCHANNEL:
-			log.Println("reply openchannel msg")
-			log.Println("partner_addr:", data.Fields["account_addr"].GetStringValue())
+			log.Println("reply openchanfieldsg")
+			log.Println("partner_addr:", data.Fields[field.Account_addr].GetStringValue())
 			log.Println("strSig:", data.Fields["sig_str"].GetStringValue())
+			c.handleReplyOpenChannel(data)
 
-		case util.POP:
+		case util.MSG_ERROR:
+			log.Fatalf("Error: %v", data.Fields[field.Error].GetStringValue())
+
 		default:
 			close(waitc)
 			//return status.Errorf(codes.Unimplemented, "Operation '%s' not implemented yet", operator)
@@ -112,31 +286,25 @@ func messageHandler(stream machine.Machine_ExecuteClient) {
 
 			return
 		}
-
 	}
 }
 
 func main() {
 
-	stream, conn, err := connect()
+	stream, conn, err := connect(serverAddr)
 
 	if err != nil {
 		log.Printf("Err: %v", err)
 		return
 	}
 
-	go messageHandler(stream)
+	client := new(MachineClient)
 
-	var req_open_msg = data.Msg_ReqOpen{
-		Version:        "0.1",
-		Account_Name:   "",
-		Publickey:      "string", // account address
-		Deposit_Amount: 5,        // sdk.Coin {denom: string, amount: Int}
-		Deposit_Denom:  "astra",
-		Hashcode:       "abcd",
-		MinCoin:        1,
-	}
-	openChannel(stream, req_open_msg)
+	client.Init(stream)
+
+	go eventHandler(client)
+
+	client.openChannel()
 
 	time.Sleep(500 * time.Millisecond)
 

@@ -12,11 +12,19 @@ import (
 	"github.com/AstraProtocol/channel/app"
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
 	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/client/flags"
+	cryptoTypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	signingTypes "github.com/cosmos/cosmos-sdk/types/tx/signing"
+	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/channel"
+	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/common"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
 	util "github.com/dungtt-astra/paymentchannel/utils"
+	"github.com/dungtt-astra/paymentchannel/utils/config"
+	"github.com/dungtt-astra/paymentchannel/utils/data"
+	field "github.com/dungtt-astra/paymentchannel/utils/field"
 	"github.com/evmos/ethermint/encoding"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
@@ -27,6 +35,11 @@ import (
 
 type MachineServer struct {
 	machine.UnimplementedMachineServer
+	stream      machine.Machine_ExecuteServer
+	ThisAccount *account.PrivateKeySerialized
+	cn          *channel.Channel
+	ChannelInfo data.Msg_Channel
+	rpcClient   client.Context
 }
 
 type conn struct {
@@ -36,108 +49,273 @@ type conn struct {
 
 var thiscon [2]conn
 var server MachineServer
-var mmemonic = "excuse quiz oyster vendor often spray day vanish slice topic pudding crew promote floor shadow best subway slush slender good merit hollow certain repeat"
+var mmemonic = "antenna guard panda arena drill ankle episode render veteran artist simple clerk seminar math cruise speed vacuum visa hen surround impulse ivory special pet"
+var cfg = &config.Config{
+	ChainId:       "astra_11110-1",
+	Endpoint:      "http://128.199.238.171:26657",
+	CoinType:      60,
+	PrefixAddress: "astra",
+	TokenSymbol:   "aastra",
+}
+
+func (s *MachineServer) Init(stream machine.Machine_ExecuteServer) {
+
+	s.stream = stream
+
+	sdkConfig := sdk.GetConfig()
+	sdkConfig.SetPurpose(44)
+
+	bech32PrefixAccAddr := fmt.Sprintf("%v", cfg.PrefixAddress)
+	bech32PrefixAccPub := fmt.Sprintf("%vpub", cfg.PrefixAddress)
+	sdkConfig.SetBech32PrefixForAccount(bech32PrefixAccAddr, bech32PrefixAccPub)
+
+	s.rpcClient = client.Context{}
+	encodingConfig := encoding.MakeConfig(app.ModuleBasics)
+
+	rpcHttp, err := client.NewClientFromNode(cfg.Endpoint)
+	if err != nil {
+		panic(err)
+	}
+
+	s.rpcClient = s.rpcClient.
+		WithClient(rpcHttp).
+		//WithNodeURI(c.endpoint).
+		WithCodec(encodingConfig.Marshaler).
+		WithInterfaceRegistry(encodingConfig.InterfaceRegistry).
+		WithTxConfig(encodingConfig.TxConfig).
+		WithLegacyAmino(encodingConfig.Amino).
+		WithChainID(cfg.ChainId).
+		WithAccountRetriever(authTypes.AccountRetriever{}).
+		WithBroadcastMode(flags.BroadcastSync).
+		WithTxConfig(encodingConfig.TxConfig)
+
+	s.cn = channel.NewChannel(s.rpcClient)
+
+	acc, err := account.NewAccount().ImportAccount(mmemonic)
+	if err != nil {
+		log.Println("ImportAccount Err:", err.Error())
+		return
+	}
+
+	s.ThisAccount = acc
+	s.ChannelInfo.PartA = s.ThisAccount.AccAddress().String()
+	s.ChannelInfo.Amount_partA = 10
+}
 
 // var waitc = make(chan struct{})
 func (s *MachineServer) validateReqOpenChannelData(data *structpb.Struct) error {
-	if len(data.Fields["account_name"].GetStringValue()) == 0 {
+
+	if len(data.Fields[field.Deposit_denom].GetStringValue()) == 0 {
+		return errors.New("Invalid denom")
+	}
+
+	if len(data.Fields[field.Account_name].GetStringValue()) == 0 {
 		return errors.New("empty account name")
 	}
+
+	acc, err := account.NewPKAccount(data.Fields[field.Public_key].GetStringValue())
+	if err != nil {
+		return err
+	}
+
 	// debug
-	fmt.Printf("AcceptOpenChannel: version %v, account %v, amt %v \n",
-		data.Fields["version"].GetStringValue(),
-		data.Fields["account_name"].GetStringValue(),
-		data.Fields["deposit_amount"].GetNumberValue())
+	fmt.Printf("AcceptOpenChannel: version %v, account %v, pubkey %v, addr %v \n",
+		data.Fields[field.Version].GetStringValue(),
+		data.Fields[field.Account_name].GetStringValue(),
+		data.Fields[field.Public_key].GetNumberValue(),
+		acc.AccAddress().String())
+
+	_, err = sdk.AccAddressFromBech32(acc.AccAddress().String())
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (s *MachineServer) sendRepOpenChannel(stream machine.Machine_ExecuteServer, msg *channelTypes.MsgOpenChannel, strSig string) error {
-
-	hashcode := "abc"
+func (s *MachineServer) sendError(e error) error {
 	var item = &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"account_addr": &structpb.Value{Kind: &structpb.Value_StringValue{
-				msg.PartA}},
-			"multisig_addr": &structpb.Value{Kind: &structpb.Value_StringValue{
-				msg.MultisigAddr}},
-			//"publickey": &structpb.Value{Kind: &structpb.Value_StringValue{
-			//	reqOpenMsg.Publickey}},
-			"deposit_amount": &structpb.Value{Kind: &structpb.Value_NumberValue{
-				float64(msg.CoinA.Amount.Int64())}},
-			"deposit_denom": &structpb.Value{Kind: &structpb.Value_StringValue{
-				msg.CoinA.Denom}},
-			"hashcode": &structpb.Value{Kind: &structpb.Value_StringValue{
+			field.Error: &structpb.Value{Kind: &structpb.Value_StringValue{
+				e.Error()}},
+		},
+	}
+
+	msg := machine.Instruction{Cmd: util.MSG_ERROR, Data: item}
+
+	if err := s.stream.Send(&msg); err != nil {
+		log.Fatalf("%v.Send(%v) = %v: ", s.stream, msg, err)
+		return err
+	}
+
+	return nil
+}
+
+func (s *MachineServer) doReplyOpenChannel(pubkey string, multisig_pubkey string) error {
+
+	hashcode := "abc"
+	log.Println("start RepOpenChannel")
+	log.Println("AccAddress:", s.ThisAccount.AccAddress().String())
+	log.Println("AccAddress:", s.ChannelInfo.Multisig_Addr)
+	log.Println("AccAddress:", s.ChannelInfo.Amount_partA)
+
+	var item = &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			field.PartA_addr: &structpb.Value{Kind: &structpb.Value_StringValue{
+				s.ThisAccount.AccAddress().String()}},
+			field.Multisig_addr: &structpb.Value{Kind: &structpb.Value_StringValue{
+				s.ChannelInfo.Multisig_Addr}},
+			field.Public_key: &structpb.Value{Kind: &structpb.Value_StringValue{
+				pubkey}},
+			field.Deposit_amount: &structpb.Value{Kind: &structpb.Value_NumberValue{
+				s.ChannelInfo.Amount_partA}},
+			field.Hashcode: &structpb.Value{Kind: &structpb.Value_StringValue{
 				hashcode}},
-			"sig_str": &structpb.Value{Kind: &structpb.Value_StringValue{
-				strSig}},
+			field.Multisig_pubkey: &structpb.Value{Kind: &structpb.Value_StringValue{
+				multisig_pubkey}},
 		},
 	}
 
 	instruct := machine.Instruction{Cmd: "REP_OPENCHANNEL", Data: item}
 
 	log.Println("RepOpenChannel")
-	if err := stream.Send(&instruct); err != nil {
-		log.Fatalf("%v.Send(%v) = %v: ", stream, instruct, err)
+	if err := s.stream.Send(&instruct); err != nil {
+		log.Fatalf("%v.Send(%v) = %v: ", s.stream, instruct, err)
 		return err
 	}
 	return nil
 }
 
-func (s *MachineServer) handleReqOpenChannel(stream machine.Machine_ExecuteServer, data *structpb.Struct) {
+func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
+	log.Println("Start handle ReqOpenChannel...")
 
 	if err := s.validateReqOpenChannelData(data); err != nil {
+		s.sendError(err)
 		log.Println("Err:", err.Error())
 		return
 	}
 
-	peerAccount := account.NewPKAccount(data.Fields["publickey"].GetStringValue())
-	thisAccount, _ := account.NewAccount().ImportAccount(mmemonic)
+	peerAccount, err := account.NewPKAccount(data.Fields[field.Public_key].GetStringValue())
+	if err != nil {
+		log.Println("NewPKAccount Err:", err.Error())
+		return
+	}
+
 	//@todo create multi account
-	acc := account.NewAccount()
-	multisigAddr, multiSigPubkey, _ := acc.CreateMulSigAccountFromTwoAccount(thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	log.Println("this publickey:", s.ThisAccount.PublicKey())
+	log.Println("peer publickey:", peerAccount.PublicKey())
+	multisigAddr, MultiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.ThisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	if err != nil {
+		s.sendError(err)
+		return
+	}
+
+	s.ChannelInfo.Denom = data.Fields[field.Deposit_denom].GetStringValue()
+	s.ChannelInfo.Amount_partB = data.Fields[field.Deposit_amount].GetNumberValue()
+	s.ChannelInfo.PartB = peerAccount.AccAddress().String()
+	s.ChannelInfo.Multisig_Addr = multisigAddr
+	s.ChannelInfo.Multisig_Pubkey = MultiSigPubkey
+
+	log.Println("multisigAddr:", multisigAddr)
+	log.Println("multisigPubkey:", MultiSigPubkey.String())
+
+	//log.Println("strSig: ", strSig)
+	s.doReplyOpenChannel(s.ThisAccount.PublicKey().String(), MultiSigPubkey.String())
+}
+
+func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTypes.PubKey, sig1, sig2 string, msgRequest channel.SignMsgRequest) (*sdk.TxResponse, error) {
+	signList := make([][]signingTypes.SignatureV2, 0)
+
+	signByte1, err := common.TxBuilderSignatureJsonDecoder(client.TxConfig, sig1)
+	if err != nil {
+		return nil, err
+	}
+	signList = append(signList, signByte1)
+
+	signByte2, err := common.TxBuilderSignatureJsonDecoder(client.TxConfig, sig2)
+	if err != nil {
+		return nil, err
+	}
+	signList = append(signList, signByte2)
+
+	newTx := common.NewTxMulSign(client,
+		nil,
+		msgRequest.GasLimit,
+		msgRequest.GasPrice,
+		0,
+		2)
+
+	txBuilderMultiSign, err := newTx.BuildUnsignedTx(msgRequest.Msg)
+	if err != nil {
+
+		return nil, err
+	}
+
+	err = newTx.CreateTxMulSign(txBuilderMultiSign, multiSigPubkey, 60, signList)
+	if err != nil {
+
+		return nil, err
+	}
+
+	txJson, err := common.TxBuilderJsonEncoder(client.TxConfig, txBuilderMultiSign)
+	if err != nil {
+
+		return nil, err
+	}
+
+	txByte, err := common.TxBuilderJsonDecoder(client.TxConfig, txJson)
+	if err != nil {
+
+		return nil, err
+	}
+	// txHash := common.TxHash(txByte)
+	return client.BroadcastTxCommit(txByte)
+}
+
+func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.TxResponse, error) {
 
 	msg := channelTypes.NewMsgOpenChannel(
-		multisigAddr,
-		thisAccount.AccAddress().String(),
-		peerAccount.AccAddress().String(),
+		s.ChannelInfo.Multisig_Addr,
+		s.ChannelInfo.PartA,
+		s.ChannelInfo.PartB,
 		&sdk.Coin{
-			Denom:  data.Fields["deposit_denom"].GetStringValue(),
-			Amount: sdk.NewInt(1000000000000000000),
+			Denom:  s.ChannelInfo.Denom,
+			Amount: sdk.NewInt(int64(s.ChannelInfo.Amount_partA)),
 		},
 		&sdk.Coin{
-			Denom:  "aastra",
-			Amount: sdk.NewInt(1000000000000000000),
+			Denom:  s.ChannelInfo.Denom,
+			Amount: sdk.NewInt(int64(s.ChannelInfo.Amount_partB)),
 		},
-		multisigAddr,
+		s.ChannelInfo.Multisig_Addr,
 	)
 
 	openChannelRequest := channel.SignMsgRequest{
 		Msg:      msg,
 		GasLimit: 200000,
-		GasPrice: "25aastra",
+		GasPrice: "1aastra",
 	}
 
-	//channelClient := client.NewChannelClient()
-	rpcClient := client.Context{}
-	encodingConfig := encoding.MakeConfig(app.ModuleBasics)
-	rpcClient.WithChainID("astra_11110-1").WithTxConfig(encodingConfig.TxConfig)
+	strSig1, err := s.cn.SignMultisigTxFromOneAccount(openChannelRequest, s.ThisAccount, s.ChannelInfo.Multisig_Pubkey)
 
-	//channelClient := client.NewChannelClient()
-	strSig, err := channel.NewChannel(rpcClient).SignMultisigTxFromOneAccount(openChannelRequest, thisAccount, multiSigPubkey)
+	strSig2 := data.Fields["sig_str"].GetStringValue()
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	log.Println(strSig)
-	s.sendRepOpenChannel(stream, msg, strSig)
+	txResponse, err := BuildAndBroadCastMultisigMsg(s.rpcClient, s.ChannelInfo.Multisig_Pubkey, strSig1, strSig2, openChannelRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("TXID:", txResponse.Info)
+	return txResponse, nil
 }
 
-func eventHandler(stream machine.Machine_ExecuteServer, waitc chan bool) {
+func eventHandler(s MachineServer, waitc chan bool) {
 	for {
 		log.Println("wait for receive instruction")
-		instruction, err := stream.Recv()
+		instruction, err := s.stream.Recv()
 		if err == io.EOF {
 			log.Println("EOF")
 			close(waitc)
@@ -155,10 +333,14 @@ func eventHandler(stream machine.Machine_ExecuteServer, waitc chan bool) {
 
 		switch cmd_type {
 		case util.REQ_OPENCHANNEL:
-			server.handleReqOpenChannel(stream, data)
+			server.handleReqOpenChannel(data)
 			//log.Println("AcceptOpenChannel: name %v, ", data.Fields["name"].GetStringValue())
 
-		case util.POP:
+		case util.MSG_ERROR:
+			log.Fatalf("%v.Send(%v) = %v: ", s.stream, cmd, data)
+
+		case util.CONFIRM_OPENCHANNEL:
+			server.handleConfirmOpenChannel(data)
 
 		default:
 			close(waitc)
@@ -185,7 +367,9 @@ func (s *MachineServer) Execute(stream machine.Machine_ExecuteServer) error {
 
 	waitc := make(chan bool)
 
-	go eventHandler(stream, waitc)
+	server.Init(stream)
+
+	go eventHandler(server, waitc)
 
 	<-waitc
 

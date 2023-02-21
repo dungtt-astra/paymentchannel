@@ -2,7 +2,6 @@ package channel
 
 import (
 	"context"
-
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	cryptoTypes "github.com/cosmos/cosmos-sdk/crypto/types"
@@ -13,7 +12,7 @@ import (
 )
 
 type Channel struct {
-	rpcClient client.Context
+	RpcClient client.Context
 }
 
 type SignMsgRequest struct {
@@ -35,7 +34,7 @@ func (cn *Channel) SignMultisigTxFromOneAccount(req SignMsgRequest,
 		return "", err
 	}
 
-	newTx := common.NewMultisigTxBuilder(cn.rpcClient, account, req.GasLimit, req.GasPrice, 0, 2)
+	newTx := common.NewMultisigTxBuilder(cn.RpcClient, account, req.GasLimit, req.GasPrice, 0, 2)
 	txBuilder, err := newTx.BuildUnsignedTx(req.Msg)
 
 	if err != nil {
@@ -47,7 +46,7 @@ func (cn *Channel) SignMultisigTxFromOneAccount(req SignMsgRequest,
 		return "", errors.Wrap(err, "SignTx")
 	}
 
-	sign, err := common.TxBuilderSignatureJsonEncoder(cn.rpcClient.TxConfig, txBuilder)
+	sign, err := common.TxBuilderSignatureJsonEncoder(cn.RpcClient.TxConfig, txBuilder)
 	if err != nil {
 		return "", errors.Wrap(err, "GetSign")
 	}
@@ -56,6 +55,6 @@ func (cn *Channel) SignMultisigTxFromOneAccount(req SignMsgRequest,
 }
 
 func (cn *Channel) ListChannel() (*channelTypes.QueryAllChannelResponse, error) {
-	channelClient := channelTypes.NewQueryClient(cn.rpcClient)
+	channelClient := channelTypes.NewQueryClient(cn.RpcClient)
 	return channelClient.ChannelAll(context.Background(), &channelTypes.QueryAllChannelRequest{})
 }
