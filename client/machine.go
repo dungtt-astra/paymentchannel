@@ -9,14 +9,12 @@ package main
 import "C"
 import (
 	"context"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"github.com/AstraProtocol/channel/app"
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
-	"github.com/cosmos/cosmos-sdk/crypto/keys/multisig"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
@@ -51,7 +49,7 @@ type MachineClient struct {
 	cn       *channel.Channel
 }
 
-var mmemonic = "antenna guard panda arena drill ankle episode render veteran artist simple clerk seminar math cruise speed vacuum visa hen surround impulse ivory special pet"
+var mmemonic = "baby cancel magnet patient urge regular ribbon scorpion buyer zoo muffin style echo flock soda text door multiply present vocal budget employ target radar"
 
 var waitc = make(chan struct{})
 
@@ -209,28 +207,43 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 
 	c.channel.Multisig_Addr = data.Fields[field.Multisig_addr].GetStringValue()
 	c.channel.PartA = data.Fields[field.PartA_addr].GetStringValue()
+	c.channel.Amount_partA = data.Fields[field.Deposit_amount].GetNumberValue()
+	c.channel.PubkeyA = data.Fields[field.Public_key].GetStringValue()
 	c.channel.PartB = c.account.AccAddress().String()
-	c.channel.PubkeyB = data.Fields[field.Public_key].GetStringValue()
 
-	multiSigPubKeyStr := data.Fields[field.Multisig_pubkey].GetStringValue()
-	multiSigPubKeyBytes, err := hex.DecodeString(multiSigPubKeyStr)
+	//multiSigPubKeyStr := data.Fields[field.Multisig_pubkey].GetStringValue()
+	//multiSigPubKeyBytes, err := hex.DecodeString(multiSigPubKeyStr)
+	//if err != nil {
+	//	log.Printf("DecodeString error: %v\n", err)
+	//	return err
+	//}
+	//
+	//multiSigPubKey := new(multisig.LegacyAminoPubKey)
+	//err = multisig.AminoCdc.Unmarshal(multiSigPubKeyBytes, multiSigPubKey)
+	//if err != nil {
+	//	log.Printf("AminoCdc.Unmarshal error: %v\n", err)
+	//}
+	//log.Printf("PubKeys: %v, %v\n", multiSigPubKey.PubKeys[0], multiSigPubKey.PubKeys[1])
+
+	partA_Account, err := account.NewPKAccount(c.channel.PubkeyA)
 	if err != nil {
-		log.Printf("DecodeString error: %v\n", err)
+		log.Println("NewPKAccount Err:", err.Error())
 		return err
 	}
 
-	multiSigPubKey := new(multisig.LegacyAminoPubKey)
-	err = multisig.AminoCdc.Unmarshal(multiSigPubKeyBytes, multiSigPubKey)
+	multisigAddr, multiSigPubKey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(partA_Account.PublicKey(), c.account.PublicKey(), 2)
 	if err != nil {
-		log.Printf("AminoCdc.Unmarshal error: %v\n", err)
+		//c.sendError(err)
+		return err
 	}
-	log.Printf("PubKeys: %v, %v\n", multiSigPubKey.PubKeys[0], multiSigPubKey.PubKeys[1])
 
-	//multisigAccount, err := account.NewPKAccount(data.Fields[field.Multisig_pubkey].GetStringValue())
-	//if err != nil {
-	//	log.Println("NewPKAccount Err:", err.Error())
-	//	return err
-	//}
+	if multisigAddr != c.channel.Multisig_Addr {
+		err := fmt.Errorf("Invalid multisigAddr expected:%v, got:%v", c.channel.Multisig_Addr, multisigAddr)
+		log.Println(err.Error())
+		return err
+	}
+
+	log.Println("multisigAddr:", c.channel.Multisig_Addr)
 
 	msg := channelTypes.NewMsgOpenChannel(
 		c.channel.Multisig_Addr,
@@ -238,7 +251,7 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 		c.channel.PartB,
 		&sdk.Coin{
 			Denom:  c.channel.Denom,
-			Amount: sdk.NewInt(int64(data.Fields[field.Deposit_amount].GetNumberValue())),
+			Amount: sdk.NewInt(int64(c.channel.Amount_partA)),
 		},
 		&sdk.Coin{
 			Denom:  c.channel.Denom,
@@ -250,7 +263,7 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 	openChannelRequest := channel.SignMsgRequest{
 		Msg:      msg,
 		GasLimit: 200000,
-		GasPrice: "25aastra",
+		GasPrice: "1aastra",
 	}
 
 	strSig, err := c.cn.SignMultisigTxFromOneAccount(openChannelRequest, c.account, multiSigPubKey)
@@ -259,6 +272,7 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 		return err
 	}
 
+	log.Println("openChannelRequest:", openChannelRequest)
 	log.Printf("strSig: %v\n", strSig)
 
 	c.doConfirmOpenChannel(strSig)
@@ -287,8 +301,7 @@ func eventHandler(c *MachineClient) {
 		switch cmd_type {
 		case util.REP_OPENCHANNEL:
 			log.Println("reply openchanfieldsg")
-			log.Println("partner_addr:", data.Fields[field.Account_addr].GetStringValue())
-			log.Println("strSig:", data.Fields["sig_str"].GetStringValue())
+			log.Println("partA_pubkey:", data.Fields[field.Public_key].GetStringValue())
 			c.handleReplyOpenChannel(data)
 
 		case util.MSG_ERROR:

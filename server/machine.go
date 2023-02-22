@@ -36,9 +36,9 @@ import (
 type MachineServer struct {
 	machine.UnimplementedMachineServer
 	stream      machine.Machine_ExecuteServer
-	ThisAccount *account.PrivateKeySerialized
+	thisAccount *account.PrivateKeySerialized
 	cn          *channel.Channel
-	ChannelInfo data.Msg_Channel
+	channelInfo data.Msg_Channel
 	rpcClient   client.Context
 }
 
@@ -49,7 +49,7 @@ type conn struct {
 
 var thiscon [2]conn
 var server MachineServer
-var mmemonic = "antenna guard panda arena drill ankle episode render veteran artist simple clerk seminar math cruise speed vacuum visa hen surround impulse ivory special pet"
+var mmemonic = "leaf emerge will mix junior smile tortoise mystery scheme chair fancy afraid badge carpet pottery raw vicious hood exile amateur symbol battle oyster action"
 var cfg = &config.Config{
 	ChainId:       "astra_11110-1",
 	Endpoint:      "http://128.199.238.171:26657",
@@ -69,7 +69,7 @@ func (s *MachineServer) Init(stream machine.Machine_ExecuteServer) {
 	bech32PrefixAccPub := fmt.Sprintf("%vpub", cfg.PrefixAddress)
 	sdkConfig.SetBech32PrefixForAccount(bech32PrefixAccAddr, bech32PrefixAccPub)
 
-	s.rpcClient = client.Context{}
+	rpcClient := client.Context{}
 	encodingConfig := encoding.MakeConfig(app.ModuleBasics)
 
 	rpcHttp, err := client.NewClientFromNode(cfg.Endpoint)
@@ -77,9 +77,9 @@ func (s *MachineServer) Init(stream machine.Machine_ExecuteServer) {
 		panic(err)
 	}
 
-	s.rpcClient = s.rpcClient.
+	s.rpcClient = rpcClient.
 		WithClient(rpcHttp).
-		//WithNodeURI(c.endpoint).
+		//WithNodeURI(cfg.Endpoint).
 		WithCodec(encodingConfig.Marshaler).
 		WithInterfaceRegistry(encodingConfig.InterfaceRegistry).
 		WithTxConfig(encodingConfig.TxConfig).
@@ -97,9 +97,9 @@ func (s *MachineServer) Init(stream machine.Machine_ExecuteServer) {
 		return
 	}
 
-	s.ThisAccount = acc
-	s.ChannelInfo.PartA = s.ThisAccount.AccAddress().String()
-	s.ChannelInfo.Amount_partA = 10
+	s.thisAccount = acc
+	s.channelInfo.PartA = s.thisAccount.AccAddress().String()
+	s.channelInfo.Amount_partA = 3
 }
 
 // var waitc = make(chan struct{})
@@ -155,20 +155,20 @@ func (s *MachineServer) doReplyOpenChannel(pubkey string, multisig_pubkey string
 
 	hashcode := "abc"
 	log.Println("start RepOpenChannel")
-	log.Println("AccAddress:", s.ThisAccount.AccAddress().String())
-	log.Println("AccAddress:", s.ChannelInfo.Multisig_Addr)
-	log.Println("AccAddress:", s.ChannelInfo.Amount_partA)
+	//log.Println("PartA AccAddress:", s.thisAccount.AccAddress().String())
+	//log.Println("Multisig AccAddress:", s.channelInfo.Multisig_Addr)
+	//log.Println("Part A deposit:", s.channelInfo.Amount_partA)
 
 	var item = &structpb.Struct{
 		Fields: map[string]*structpb.Value{
 			field.PartA_addr: &structpb.Value{Kind: &structpb.Value_StringValue{
-				s.ThisAccount.AccAddress().String()}},
+				s.thisAccount.AccAddress().String()}},
 			field.Multisig_addr: &structpb.Value{Kind: &structpb.Value_StringValue{
-				s.ChannelInfo.Multisig_Addr}},
+				s.channelInfo.Multisig_Addr}},
 			field.Public_key: &structpb.Value{Kind: &structpb.Value_StringValue{
 				pubkey}},
 			field.Deposit_amount: &structpb.Value{Kind: &structpb.Value_NumberValue{
-				s.ChannelInfo.Amount_partA}},
+				s.channelInfo.Amount_partA}},
 			field.Hashcode: &structpb.Value{Kind: &structpb.Value_StringValue{
 				hashcode}},
 			field.Multisig_pubkey: &structpb.Value{Kind: &structpb.Value_StringValue{
@@ -202,24 +202,25 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 	}
 
 	//@todo create multi account
-	log.Println("this publickey:", s.ThisAccount.PublicKey(), s.ThisAccount.PublicKey().String())
-	log.Println("peer publickey:", peerAccount.PublicKey(), s.ThisAccount.PublicKey().String())
-	multisigAddr, MultiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.ThisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	//log.Println("this publickey:", s.thisAccount.PublicKey(), s.thisAccount.PublicKey().String())
+	//log.Println("peer publickey:", peerAccount.PublicKey(), s.thisAccount.PublicKey().String())
+	multisigAddr, multiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
 	if err != nil {
 		s.sendError(err)
 		return
 	}
 
-	s.ChannelInfo.Denom = data.Fields[field.Deposit_denom].GetStringValue()
-	s.ChannelInfo.Amount_partB = data.Fields[field.Deposit_amount].GetNumberValue()
-	s.ChannelInfo.PartB = peerAccount.AccAddress().String()
-	s.ChannelInfo.Multisig_Addr = multisigAddr
-	s.ChannelInfo.Multisig_Pubkey = MultiSigPubkey
+	s.channelInfo.Denom = data.Fields[field.Deposit_denom].GetStringValue()
+	s.channelInfo.Amount_partB = data.Fields[field.Deposit_amount].GetNumberValue()
+	s.channelInfo.PartB = peerAccount.AccAddress().String()
+	s.channelInfo.PubkeyB = data.Fields[field.Public_key].GetStringValue()
+	s.channelInfo.Multisig_Addr = multisigAddr
+	s.channelInfo.Multisig_Pubkey = multiSigPubkey
 
 	log.Println("multisigAddr:", multisigAddr)
 
 	//log.Println("strSig: ", strSig)
-	s.doReplyOpenChannel(s.ThisAccount.PublicKey().String(), fmt.Sprintf("%x", MultiSigPubkey.Bytes()))
+	s.doReplyOpenChannel(s.thisAccount.PublicKey().String(), fmt.Sprintf("%x", multiSigPubkey.Bytes()))
 }
 
 func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTypes.PubKey, sig1, sig2 string, msgRequest channel.SignMsgRequest) (*sdk.TxResponse, error) {
@@ -241,51 +242,48 @@ func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTy
 		nil,
 		msgRequest.GasLimit,
 		msgRequest.GasPrice,
-		0,
-		2)
+	)
 
 	txBuilderMultiSign, err := newTx.BuildUnsignedTx(msgRequest.Msg)
 	if err != nil {
-
 		return nil, err
 	}
 
 	err = newTx.CreateTxMulSign(txBuilderMultiSign, multiSigPubkey, 60, signList)
 	if err != nil {
-
 		return nil, err
 	}
 
 	txJson, err := common.TxBuilderJsonEncoder(client.TxConfig, txBuilderMultiSign)
 	if err != nil {
-
 		return nil, err
 	}
 
 	txByte, err := common.TxBuilderJsonDecoder(client.TxConfig, txJson)
 	if err != nil {
-
 		return nil, err
 	}
+
 	// txHash := common.TxHash(txByte)
+
 	return client.BroadcastTxCommit(txByte)
 }
 
 func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.TxResponse, error) {
 
 	msg := channelTypes.NewMsgOpenChannel(
-		s.ChannelInfo.Multisig_Addr,
-		s.ChannelInfo.PartA,
-		s.ChannelInfo.PartB,
+		s.channelInfo.Multisig_Addr,
+		s.channelInfo.PartA,
+		s.channelInfo.PartB,
 		&sdk.Coin{
-			Denom:  s.ChannelInfo.Denom,
-			Amount: sdk.NewInt(int64(s.ChannelInfo.Amount_partA)),
+			Denom:  s.channelInfo.Denom,
+			Amount: sdk.NewInt(int64(s.channelInfo.Amount_partA)),
 		},
 		&sdk.Coin{
-			Denom:  s.ChannelInfo.Denom,
-			Amount: sdk.NewInt(int64(s.ChannelInfo.Amount_partB)),
+			Denom:  s.channelInfo.Denom,
+			Amount: sdk.NewInt(int64(s.channelInfo.Amount_partB)),
 		},
-		s.ChannelInfo.Multisig_Addr,
+		s.channelInfo.Multisig_Addr,
 	)
 
 	openChannelRequest := channel.SignMsgRequest{
@@ -294,20 +292,44 @@ func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.Tx
 		GasPrice: "1aastra",
 	}
 
-	strSig1, err := s.cn.SignMultisigTxFromOneAccount(openChannelRequest, s.ThisAccount, s.ChannelInfo.Multisig_Pubkey)
+	//log.Println("openChannelRequest:", openChannelRequest)
+	//log.Printf("multisigaddress: %v\n", s.channelInfo.Multisig_Addr)
+	peerAccount, err := account.NewPKAccount(s.channelInfo.PubkeyB)
+	if err != nil {
+		log.Println("NewPKAccount Err:", err.Error())
+		return nil, err
+	}
 
+	//@todo create multi account
+	//log.Println("this publickey:", s.thisAccount.PublicKey(), s.thisAccount.PublicKey().String())
+	//log.Println("peer publickey:", peerAccount.PublicKey(), s.thisAccount.PublicKey().String())
+	multisig_addr, multiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	if err != nil {
+		s.sendError(err)
+		return nil, err
+	}
+	log.Println("multisig_addr:", multisig_addr)
+
+	strSig1, err := s.cn.SignMultisigTxFromOneAccount(openChannelRequest, s.thisAccount, multiSigPubkey)
+	if err != nil {
+		log.Println("SignMultisigTxFromOneAccount Err:", err.Error())
+		return nil, err
+	}
+
+	//@todo create multi account
 	strSig2 := data.Fields["sig_str"].GetStringValue()
 
+	//
+	log.Println("strSig1:", strSig1)
+	log.Println("strSig2:", strSig2)
+
+	txResponse, err := BuildAndBroadCastMultisigMsg(s.rpcClient, multiSigPubkey, strSig1, strSig2, openChannelRequest)
 	if err != nil {
+		log.Printf("BuildAndBroadCastMultisigMsg Err: %v", err.Error())
 		return nil, err
 	}
 
-	txResponse, err := BuildAndBroadCastMultisigMsg(s.rpcClient, s.ChannelInfo.Multisig_Pubkey, strSig1, strSig2, openChannelRequest)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Println("TXID:", txResponse.Info)
+	log.Printf("TXID:%v, gas used:%v, code:%v \n", txResponse.TxHash, txResponse.GasUsed, txResponse.Code)
 	return txResponse, nil
 }
 
