@@ -202,8 +202,8 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 	}
 
 	//@todo create multi account
-	log.Println("this publickey:", s.ThisAccount.PublicKey())
-	log.Println("peer publickey:", peerAccount.PublicKey())
+	log.Println("this publickey:", s.ThisAccount.PublicKey(), s.ThisAccount.PublicKey().String())
+	log.Println("peer publickey:", peerAccount.PublicKey(), s.ThisAccount.PublicKey().String())
 	multisigAddr, MultiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.ThisAccount.PublicKey(), peerAccount.PublicKey(), 2)
 	if err != nil {
 		s.sendError(err)
@@ -217,10 +217,9 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 	s.ChannelInfo.Multisig_Pubkey = MultiSigPubkey
 
 	log.Println("multisigAddr:", multisigAddr)
-	log.Println("multisigPubkey:", MultiSigPubkey.String())
 
 	//log.Println("strSig: ", strSig)
-	s.doReplyOpenChannel(s.ThisAccount.PublicKey().String(), MultiSigPubkey.String())
+	s.doReplyOpenChannel(s.ThisAccount.PublicKey().String(), fmt.Sprintf("%x", MultiSigPubkey.Bytes()))
 }
 
 func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTypes.PubKey, sig1, sig2 string, msgRequest channel.SignMsgRequest) (*sdk.TxResponse, error) {

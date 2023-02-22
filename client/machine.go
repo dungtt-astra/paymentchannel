@@ -9,12 +9,14 @@ package main
 import "C"
 import (
 	"context"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"github.com/AstraProtocol/channel/app"
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/multisig"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
@@ -210,11 +212,25 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 	c.channel.PartB = c.account.AccAddress().String()
 	c.channel.PubkeyB = data.Fields[field.Public_key].GetStringValue()
 
-	multisigAccount, err := account.NewPKAccount(data.Fields[field.Multisig_pubkey].GetStringValue())
+	multiSigPubKeyStr := data.Fields[field.Multisig_pubkey].GetStringValue()
+	multiSigPubKeyBytes, err := hex.DecodeString(multiSigPubKeyStr)
 	if err != nil {
-		log.Println("NewPKAccount Err:", err.Error())
+		log.Printf("DecodeString error: %v\n", err)
 		return err
 	}
+
+	multiSigPubKey := new(multisig.LegacyAminoPubKey)
+	err = multisig.AminoCdc.Unmarshal(multiSigPubKeyBytes, multiSigPubKey)
+	if err != nil {
+		log.Printf("AminoCdc.Unmarshal error: %v\n", err)
+	}
+	log.Printf("PubKeys: %v, %v\n", multiSigPubKey.PubKeys[0], multiSigPubKey.PubKeys[1])
+
+	//multisigAccount, err := account.NewPKAccount(data.Fields[field.Multisig_pubkey].GetStringValue())
+	//if err != nil {
+	//	log.Println("NewPKAccount Err:", err.Error())
+	//	return err
+	//}
 
 	msg := channelTypes.NewMsgOpenChannel(
 		c.channel.Multisig_Addr,
@@ -237,14 +253,13 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 		GasPrice: "25aastra",
 	}
 
-	strSig, err := c.cn.SignMultisigTxFromOneAccount(openChannelRequest, c.account, multisigAccount.PublicKey())
-
+	strSig, err := c.cn.SignMultisigTxFromOneAccount(openChannelRequest, c.account, multiSigPubKey)
 	if err != nil {
-		panic(err)
+		log.Printf("SignMultisigTxFromOneAccount error: %v\n", err)
 		return err
 	}
 
-	log.Println("strSig: %v", strSig)
+	log.Printf("strSig: %v\n", strSig)
 
 	c.doConfirmOpenChannel(strSig)
 	return nil
