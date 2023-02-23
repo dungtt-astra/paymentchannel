@@ -11,20 +11,21 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/AstraProtocol/astra-go-sdk/account"
+	"github.com/AstraProtocol/astra-go-sdk/channel"
 	"github.com/AstraProtocol/channel/app"
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
-	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/channel"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
 	util "github.com/dungtt-astra/paymentchannel/utils"
 	"github.com/dungtt-astra/paymentchannel/utils/config"
 	data "github.com/dungtt-astra/paymentchannel/utils/data"
 	"github.com/dungtt-astra/paymentchannel/utils/field"
 	"github.com/evmos/ethermint/encoding"
+	ethermintTypes "github.com/evmos/ethermint/types"
 	structpb "github.com/golang/protobuf/ptypes/struct"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -39,14 +40,15 @@ var (
 
 type MachineClient struct {
 	//machine.UnimplementedMachineClient
-	stream   machine.Machine_ExecuteClient
-	account  *account.PrivateKeySerialized
-	denom    string
-	amount   int64
-	version  string
-	acc_name string
-	channel  data.Msg_Channel
-	cn       *channel.Channel
+	stream    machine.Machine_ExecuteClient
+	account   *account.PrivateKeySerialized
+	denom     string
+	amount    int64
+	version   string
+	acc_name  string
+	channel   data.Msg_Channel
+	cn        *channel.Channel
+	rpcClient client.Context
 }
 
 var mmemonic = "baby cancel magnet patient urge regular ribbon scorpion buyer zoo muffin style echo flock soda text door multiply present vocal budget employ target radar"
@@ -71,12 +73,20 @@ func (c *MachineClient) Init(stream machine.Machine_ExecuteClient) {
 	// set astra address
 	sdkConfig := sdk.GetConfig()
 	sdkConfig.SetPurpose(44)
+	sdkConfig.SetCoinType(ethermintTypes.Bip44CoinType)
 
 	bech32PrefixAccAddr := fmt.Sprintf("%v", cfg.PrefixAddress)
 	bech32PrefixAccPub := fmt.Sprintf("%vpub", cfg.PrefixAddress)
-	sdkConfig.SetBech32PrefixForAccount(bech32PrefixAccAddr, bech32PrefixAccPub)
+	bech32PrefixValAddr := fmt.Sprintf("%vvaloper", cfg.PrefixAddress)
+	bech32PrefixValPub := fmt.Sprintf("%vvaloperpub", cfg.PrefixAddress)
+	bech32PrefixConsAddr := fmt.Sprintf("%vvalcons", cfg.PrefixAddress)
+	bech32PrefixConsPub := fmt.Sprintf("%vvalconspub", cfg.PrefixAddress)
 
-	acc, err := account.NewAccount().ImportAccount(mmemonic)
+	sdkConfig.SetBech32PrefixForAccount(bech32PrefixAccAddr, bech32PrefixAccPub)
+	sdkConfig.SetBech32PrefixForValidator(bech32PrefixValAddr, bech32PrefixValPub)
+	sdkConfig.SetBech32PrefixForConsensusNode(bech32PrefixConsAddr, bech32PrefixConsPub)
+
+	acc, err := account.NewAccount(60).ImportAccount(mmemonic)
 	if err != nil {
 		log.Println("ImportAccount Err:", err.Error())
 		return
@@ -105,7 +115,7 @@ func (c *MachineClient) Init(stream machine.Machine_ExecuteClient) {
 		panic(err)
 	}
 
-	rpcClient = rpcClient.
+	c.rpcClient = rpcClient.
 		WithClient(rpcHttp).
 		//WithNodeURI(c.endpoint).
 		WithCodec(encodingConfig.Marshaler).
@@ -117,7 +127,7 @@ func (c *MachineClient) Init(stream machine.Machine_ExecuteClient) {
 		WithBroadcastMode(flags.BroadcastSync).
 		WithTxConfig(encodingConfig.TxConfig)
 
-	c.cn = channel.NewChannel(rpcClient)
+	c.cn = channel.NewChannel(c.rpcClient)
 }
 
 func connect(serverAddr *string) (machine.Machine_ExecuteClient, *grpc.ClientConn, error) {
@@ -175,6 +185,7 @@ func (c *MachineClient) openChannel() error {
 	instruct := machine.Instruction{Cmd: "REQ_OPENCHANNEL", Data: item1}
 
 	log.Println("ReqOpenChannel")
+	log.Println("Account Addr:", c.channel.PartB)
 	if err := c.stream.Send(&instruct); err != nil {
 		log.Fatalf("%v.Send(%v) = %v: ", c.stream, instruct, err)
 		return err
@@ -205,25 +216,10 @@ func (s *MachineClient) doConfirmOpenChannel(strSig string) error {
 
 func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 
-	c.channel.Multisig_Addr = data.Fields[field.Multisig_addr].GetStringValue()
 	c.channel.PartA = data.Fields[field.PartA_addr].GetStringValue()
 	c.channel.Amount_partA = data.Fields[field.Deposit_amount].GetNumberValue()
 	c.channel.PubkeyA = data.Fields[field.Public_key].GetStringValue()
 	c.channel.PartB = c.account.AccAddress().String()
-
-	//multiSigPubKeyStr := data.Fields[field.Multisig_pubkey].GetStringValue()
-	//multiSigPubKeyBytes, err := hex.DecodeString(multiSigPubKeyStr)
-	//if err != nil {
-	//	log.Printf("DecodeString error: %v\n", err)
-	//	return err
-	//}
-	//
-	//multiSigPubKey := new(multisig.LegacyAminoPubKey)
-	//err = multisig.AminoCdc.Unmarshal(multiSigPubKeyBytes, multiSigPubKey)
-	//if err != nil {
-	//	log.Printf("AminoCdc.Unmarshal error: %v\n", err)
-	//}
-	//log.Printf("PubKeys: %v, %v\n", multiSigPubKey.PubKeys[0], multiSigPubKey.PubKeys[1])
 
 	partA_Account, err := account.NewPKAccount(c.channel.PubkeyA)
 	if err != nil {
@@ -231,17 +227,12 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 		return err
 	}
 
-	multisigAddr, multiSigPubKey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(partA_Account.PublicKey(), c.account.PublicKey(), 2)
+	multisigAddr, multiSigPubKey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(partA_Account.PublicKey(), c.account.PublicKey(), 2)
 	if err != nil {
 		//c.sendError(err)
 		return err
 	}
-
-	if multisigAddr != c.channel.Multisig_Addr {
-		err := fmt.Errorf("Invalid multisigAddr expected:%v, got:%v", c.channel.Multisig_Addr, multisigAddr)
-		log.Println(err.Error())
-		return err
-	}
+	c.channel.Multisig_Addr = multisigAddr
 
 	log.Println("multisigAddr:", c.channel.Multisig_Addr)
 
@@ -263,10 +254,10 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 	openChannelRequest := channel.SignMsgRequest{
 		Msg:      msg,
 		GasLimit: 200000,
-		GasPrice: "1aastra",
+		GasPrice: "25aastra",
 	}
 
-	strSig, err := c.cn.SignMultisigTxFromOneAccount(openChannelRequest, c.account, multiSigPubKey)
+	_, strSig, err := c.cn.SignMultisigMsg(openChannelRequest, c.account, multiSigPubKey)
 	if err != nil {
 		log.Printf("SignMultisigTxFromOneAccount error: %v\n", err)
 		return err

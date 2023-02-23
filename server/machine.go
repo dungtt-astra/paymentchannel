@@ -9,6 +9,9 @@ package server
 import (
 	"errors"
 	"fmt"
+	"github.com/AstraProtocol/astra-go-sdk/account"
+	"github.com/AstraProtocol/astra-go-sdk/channel"
+	"github.com/AstraProtocol/astra-go-sdk/common"
 	"github.com/AstraProtocol/channel/app"
 	channelTypes "github.com/AstraProtocol/channel/x/channel/types"
 	"github.com/cosmos/cosmos-sdk/client"
@@ -17,15 +20,13 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	signingTypes "github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authTypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/account"
-	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/channel"
-	"github.com/dungtt-astra/paymentchannel/core_chain_sdk/common"
 	machine "github.com/dungtt-astra/paymentchannel/machine"
 	util "github.com/dungtt-astra/paymentchannel/utils"
 	"github.com/dungtt-astra/paymentchannel/utils/config"
 	"github.com/dungtt-astra/paymentchannel/utils/data"
 	field "github.com/dungtt-astra/paymentchannel/utils/field"
 	"github.com/evmos/ethermint/encoding"
+	ethermintTypes "github.com/evmos/ethermint/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -64,10 +65,18 @@ func (s *MachineServer) Init(stream machine.Machine_ExecuteServer) {
 
 	sdkConfig := sdk.GetConfig()
 	sdkConfig.SetPurpose(44)
+	sdkConfig.SetCoinType(ethermintTypes.Bip44CoinType)
 
 	bech32PrefixAccAddr := fmt.Sprintf("%v", cfg.PrefixAddress)
 	bech32PrefixAccPub := fmt.Sprintf("%vpub", cfg.PrefixAddress)
+	bech32PrefixValAddr := fmt.Sprintf("%vvaloper", cfg.PrefixAddress)
+	bech32PrefixValPub := fmt.Sprintf("%vvaloperpub", cfg.PrefixAddress)
+	bech32PrefixConsAddr := fmt.Sprintf("%vvalcons", cfg.PrefixAddress)
+	bech32PrefixConsPub := fmt.Sprintf("%vvalconspub", cfg.PrefixAddress)
+
 	sdkConfig.SetBech32PrefixForAccount(bech32PrefixAccAddr, bech32PrefixAccPub)
+	sdkConfig.SetBech32PrefixForValidator(bech32PrefixValAddr, bech32PrefixValPub)
+	sdkConfig.SetBech32PrefixForConsensusNode(bech32PrefixConsAddr, bech32PrefixConsPub)
 
 	rpcClient := client.Context{}
 	encodingConfig := encoding.MakeConfig(app.ModuleBasics)
@@ -91,7 +100,7 @@ func (s *MachineServer) Init(stream machine.Machine_ExecuteServer) {
 
 	s.cn = channel.NewChannel(s.rpcClient)
 
-	acc, err := account.NewAccount().ImportAccount(mmemonic)
+	acc, err := account.NewAccount(60).ImportAccount(mmemonic)
 	if err != nil {
 		log.Println("ImportAccount Err:", err.Error())
 		return
@@ -151,7 +160,7 @@ func (s *MachineServer) sendError(e error) error {
 	return nil
 }
 
-func (s *MachineServer) doReplyOpenChannel(pubkey string, multisig_pubkey string) error {
+func (s *MachineServer) doReplyOpenChannel(pubkey string) error {
 
 	hashcode := "abc"
 	log.Println("start RepOpenChannel")
@@ -171,8 +180,6 @@ func (s *MachineServer) doReplyOpenChannel(pubkey string, multisig_pubkey string
 				s.channelInfo.Amount_partA}},
 			field.Hashcode: &structpb.Value{Kind: &structpb.Value_StringValue{
 				hashcode}},
-			field.Multisig_pubkey: &structpb.Value{Kind: &structpb.Value_StringValue{
-				multisig_pubkey}},
 		},
 	}
 
@@ -202,9 +209,9 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 	}
 
 	//@todo create multi account
-	//log.Println("this publickey:", s.thisAccount.PublicKey(), s.thisAccount.PublicKey().String())
-	//log.Println("peer publickey:", peerAccount.PublicKey(), s.thisAccount.PublicKey().String())
-	multisigAddr, multiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	log.Println("PartA addr:", s.thisAccount.AccAddress().String())
+	log.Println("PartB addr:", peerAccount.AccAddress().String())
+	multisigAddr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
 	if err != nil {
 		s.sendError(err)
 		return
@@ -220,7 +227,7 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 	log.Println("multisigAddr:", multisigAddr)
 
 	//log.Println("strSig: ", strSig)
-	s.doReplyOpenChannel(s.thisAccount.PublicKey().String(), fmt.Sprintf("%x", multiSigPubkey.Bytes()))
+	s.doReplyOpenChannel(s.thisAccount.PublicKey().String())
 }
 
 func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTypes.PubKey, sig1, sig2 string, msgRequest channel.SignMsgRequest) (*sdk.TxResponse, error) {
@@ -242,6 +249,8 @@ func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTy
 		nil,
 		msgRequest.GasLimit,
 		msgRequest.GasPrice,
+		0,
+		2,
 	)
 
 	txBuilderMultiSign, err := newTx.BuildUnsignedTx(msgRequest.Msg)
@@ -289,10 +298,10 @@ func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.Tx
 	openChannelRequest := channel.SignMsgRequest{
 		Msg:      msg,
 		GasLimit: 200000,
-		GasPrice: "1aastra",
+		GasPrice: "25aastra",
 	}
 
-	//log.Println("openChannelRequest:", openChannelRequest)
+	log.Println("openChannelRequest:", openChannelRequest)
 	//log.Printf("multisigaddress: %v\n", s.channelInfo.Multisig_Addr)
 	peerAccount, err := account.NewPKAccount(s.channelInfo.PubkeyB)
 	if err != nil {
@@ -303,14 +312,14 @@ func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.Tx
 	//@todo create multi account
 	//log.Println("this publickey:", s.thisAccount.PublicKey(), s.thisAccount.PublicKey().String())
 	//log.Println("peer publickey:", peerAccount.PublicKey(), s.thisAccount.PublicKey().String())
-	multisig_addr, multiSigPubkey, err := account.NewAccount().CreateMulSigAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	multisig_addr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
 	if err != nil {
 		s.sendError(err)
 		return nil, err
 	}
 	log.Println("multisig_addr:", multisig_addr)
 
-	strSig1, err := s.cn.SignMultisigTxFromOneAccount(openChannelRequest, s.thisAccount, multiSigPubkey)
+	_, strSig1, err := s.cn.SignMultisigMsg(openChannelRequest, s.thisAccount, multiSigPubkey)
 	if err != nil {
 		log.Println("SignMultisigTxFromOneAccount Err:", err.Error())
 		return nil, err
