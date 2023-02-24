@@ -118,23 +118,19 @@ func (s *MachineServer) validateReqOpenChannelData(data *structpb.Struct) error 
 		return errors.New("Invalid denom")
 	}
 
-	if len(data.Fields[field.Account_name].GetStringValue()) == 0 {
-		return errors.New("empty account name")
+	if len(data.Fields[field.Account_addr].GetStringValue()) == 0 {
+		return errors.New("empty account address")
 	}
 
-	acc, err := account.NewPKAccount(data.Fields[field.Public_key].GetStringValue())
-	if err != nil {
-		return err
-	}
+	acc_addr := data.Fields[field.Account_addr].GetStringValue()
 
 	// debug
-	fmt.Printf("AcceptOpenChannel: version %v, account %v, pubkey %v, addr %v \n",
+	fmt.Printf("AcceptOpenChannel: version %v, account_addr %v, pubkey %v \n",
 		data.Fields[field.Version].GetStringValue(),
-		data.Fields[field.Account_name].GetStringValue(),
-		data.Fields[field.Public_key].GetNumberValue(),
-		acc.AccAddress().String())
+		data.Fields[field.Account_addr].GetStringValue(),
+		data.Fields[field.Public_key].GetStringValue())
 
-	_, err = sdk.AccAddressFromBech32(acc.AccAddress().String())
+	_, err := sdk.AccAddressFromBech32(acc_addr)
 	if err != nil {
 		return err
 	}
@@ -197,21 +193,26 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 	log.Println("Start handle ReqOpenChannel...")
 
 	if err := s.validateReqOpenChannelData(data); err != nil {
-		s.sendError(err)
-		log.Println("Err:", err.Error())
+		s.sendError(fmt.Errorf("Err: %v", err.Error()))
 		return
 	}
 
-	peerAccount, err := account.NewPKAccount(data.Fields[field.Public_key].GetStringValue())
-	if err != nil {
-		log.Println("NewPKAccount Err:", err.Error())
-		return
-	}
+	//sDec, _ := b64.StdEncoding.DecodeString(sEnc)
+	peerPubkeystr := data.Fields[field.Public_key].GetStringValue()
+	//peerPubkey := account.
+
+	//, err := util.Pubkey(peerPubkeystr)
+	//if err != nil {
+	//	s.sendError(err)
+	//	return
+	//}
+
+	peerAccAddr := data.Fields[field.Account_addr].GetStringValue()
 
 	//@todo create multi account
 	log.Println("PartA addr:", s.thisAccount.AccAddress().String())
-	log.Println("PartB addr:", peerAccount.AccAddress().String())
-	multisigAddr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	log.Println("PartB pubkey addr:", peerPubkey.String())
+	multisigAddr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerPubkey, 2)
 	if err != nil {
 		s.sendError(err)
 		return
@@ -219,8 +220,8 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 
 	s.channelInfo.Denom = data.Fields[field.Deposit_denom].GetStringValue()
 	s.channelInfo.Amount_partB = data.Fields[field.Deposit_amount].GetNumberValue()
-	s.channelInfo.PartB = peerAccount.AccAddress().String()
-	s.channelInfo.PubkeyB = data.Fields[field.Public_key].GetStringValue()
+	s.channelInfo.PartB = peerAccAddr
+	s.channelInfo.PubkeyB = peerPubkey
 	s.channelInfo.Multisig_Addr = multisigAddr
 	s.channelInfo.Multisig_Pubkey = multiSigPubkey
 
@@ -303,23 +304,23 @@ func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.Tx
 
 	log.Println("openChannelRequest:", openChannelRequest)
 	//log.Printf("multisigaddress: %v\n", s.channelInfo.Multisig_Addr)
-	peerAccount, err := account.NewPKAccount(s.channelInfo.PubkeyB)
-	if err != nil {
-		log.Println("NewPKAccount Err:", err.Error())
-		return nil, err
-	}
+	//peerAccount, err := account.NewPKAccount(s.channelInfo.PubkeyB)
+	//if err != nil {
+	//	log.Println("NewPKAccount Err:", err.Error())
+	//	return nil, err
+	//}
 
 	//@todo create multi account
 	//log.Println("this publickey:", s.thisAccount.PublicKey(), s.thisAccount.PublicKey().String())
 	//log.Println("peer publickey:", peerAccount.PublicKey(), s.thisAccount.PublicKey().String())
-	multisig_addr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerAccount.PublicKey(), 2)
+	multisig_addr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), nil, 2)
 	if err != nil {
 		s.sendError(err)
 		return nil, err
 	}
 	log.Println("multisig_addr:", multisig_addr)
 
-	_, strSig1, err := s.cn.SignMultisigMsg(openChannelRequest, s.thisAccount, multiSigPubkey)
+	strSig1, err := s.cn.SignMultisigMsg(openChannelRequest, s.thisAccount, multiSigPubkey)
 	if err != nil {
 		log.Println("SignMultisigTxFromOneAccount Err:", err.Error())
 		return nil, err
