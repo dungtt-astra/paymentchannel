@@ -103,8 +103,8 @@ func (c *MachineClient) Init(stream machine.Machine_ExecuteClient) {
 		Denom:         c.denom,
 		Amount_partA:  0,
 		Amount_partB:  float64(c.amount),
-		PubkeyA:       c.account.PublicKey().String(),
-		PubkeyB:       "",
+		PubkeyA:       c.account.PublicKey(),
+		PubkeyB:       nil,
 	}
 
 	//
@@ -223,16 +223,15 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 
 	c.channel.PartA = data.Fields[field.PartA_addr].GetStringValue()
 	c.channel.Amount_partA = data.Fields[field.Deposit_amount].GetNumberValue()
-	c.channel.PubkeyA = data.Fields[field.Public_key].GetStringValue()
 
-	//partA_Account, err := account.NewPKAccount(c.channel.PubkeyA)
-	//if err != nil {
-	//	log.Println("NewPKAccount Err:", err.Error())
-	//	return err
-	//}
+	pubkeyStr := data.Fields[field.Public_key].GetStringValue()
+
+	peerPubkey, err := account.NewPKAccount(pubkeyStr)
+
+	c.channel.PubkeyA = peerPubkey.PublicKey()
 
 	//multisigAddr, multiSigPubKey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(partA_Account.PublicKey(), c.account.PublicKey(), 2)
-	multisigAddr, multiSigPubKey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(nil, c.account.PublicKey(), 2)
+	multisigAddr, multiSigPubKey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(peerPubkey.PublicKey(), c.account.PublicKey(), 2)
 
 	if err != nil {
 		//c.sendError(err)
@@ -242,34 +241,36 @@ func (c *MachineClient) handleReplyOpenChannel(data *structpb.Struct) error {
 
 	log.Println("multisigAddr:", c.channel.Multisig_Addr)
 
-	msg := channelTypes.NewMsgOpenChannel(
-		c.channel.Multisig_Addr,
-		c.channel.PartA,
-		c.channel.PartB,
-		&sdk.Coin{
+	msg := channelTypes.MsgOpenChannel{
+		Creator: c.channel.Multisig_Addr,
+		PartA:   c.channel.PartA,
+		PartB:   c.channel.PartB,
+		CoinA: &sdk.Coin{
 			Denom:  c.channel.Denom,
 			Amount: sdk.NewInt(int64(c.channel.Amount_partA)),
 		},
-		&sdk.Coin{
+		CoinB: &sdk.Coin{
 			Denom:  c.channel.Denom,
 			Amount: sdk.NewInt(c.amount),
 		},
-		c.channel.Multisig_Addr,
-	)
+		MultisigAddr: c.channel.Multisig_Addr,
+	}
 
 	openChannelRequest := channel.SignMsgRequest{
-		Msg:      msg,
+		Msg:      &msg,
 		GasLimit: 200000,
 		GasPrice: "25aastra",
 	}
+	fmt.Println("openChannelRequest:", openChannelRequest)
 
-	strSig, err := c.cn.SignMultisigMsg(openChannelRequest, c.account, multiSigPubKey)
+	strSig, err := channel.NewChannel(c.rpcClient).SignMultisigMsg(openChannelRequest, c.account, multiSigPubKey)
 	if err != nil {
 		log.Printf("SignMultisigTxFromOneAccount error: %v\n", err)
 		return err
 	}
 
-	log.Println("openChannelRequest:", openChannelRequest)
+	fmt.Println("openChannelRequest:", openChannelRequest)
+	log.Println("PrivateKey Type:", c.account.Type())
 	log.Printf("strSig: %v\n", strSig)
 
 	c.doConfirmOpenChannel(strSig)

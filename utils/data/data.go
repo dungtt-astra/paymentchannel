@@ -1,6 +1,8 @@
 package data
 
-import "github.com/evmos/ethermint/crypto/ethsecp256k1"
+import (
+	cryptoTypes "github.com/cosmos/cosmos-sdk/crypto/types"
+)
 
 type Msg_ReqOpen struct {
 	Version        string
@@ -19,11 +21,11 @@ func (m *Msg_ReqOpen) IsEmpty() bool {
 type Msg_Channel struct {
 	Index           string
 	Multisig_Addr   string
-	Multisig_Pubkey ethsecp256k1.Pubkey
+	Multisig_Pubkey cryptoTypes.PubKey
 	PartA           string
 	PartB           string
-	PubkeyA         ethsecp256k1.Pubkey
-	PubkeyB         ethsecp256k1.Pubkey
+	PubkeyA         cryptoTypes.PubKey
+	PubkeyB         cryptoTypes.PubKey
 	Denom           string
 	Amount_partA    float64
 	Amount_partB    float64

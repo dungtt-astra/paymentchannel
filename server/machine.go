@@ -199,20 +199,15 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 
 	//sDec, _ := b64.StdEncoding.DecodeString(sEnc)
 	peerPubkeystr := data.Fields[field.Public_key].GetStringValue()
-	//peerPubkey := account.
 
-	//, err := util.Pubkey(peerPubkeystr)
-	//if err != nil {
-	//	s.sendError(err)
-	//	return
-	//}
+	peerPubkey, err := account.NewPKAccount(peerPubkeystr)
 
-	peerAccAddr := data.Fields[field.Account_addr].GetStringValue()
+	//peerAccAddr := data.Fields[field.Account_addr].GetStringValue()
 
 	//@todo create multi account
 	log.Println("PartA addr:", s.thisAccount.AccAddress().String())
-	log.Println("PartB pubkey addr:", peerPubkey.String())
-	multisigAddr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerPubkey, 2)
+	log.Println("PartB addr:", peerPubkey.AccAddress().String())
+	multisigAddr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), peerPubkey.PublicKey(), 2)
 	if err != nil {
 		s.sendError(err)
 		return
@@ -220,8 +215,8 @@ func (s *MachineServer) handleReqOpenChannel(data *structpb.Struct) {
 
 	s.channelInfo.Denom = data.Fields[field.Deposit_denom].GetStringValue()
 	s.channelInfo.Amount_partB = data.Fields[field.Deposit_amount].GetNumberValue()
-	s.channelInfo.PartB = peerAccAddr
-	s.channelInfo.PubkeyB = peerPubkey
+	s.channelInfo.PartB = peerPubkey.AccAddress().String()
+	s.channelInfo.PubkeyB = peerPubkey.PublicKey()
 	s.channelInfo.Multisig_Addr = multisigAddr
 	s.channelInfo.Multisig_Pubkey = multiSigPubkey
 
@@ -244,6 +239,10 @@ func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTy
 	if err != nil {
 		return nil, err
 	}
+
+	log.Println("strSig1:", signByte1)
+	log.Println("strSig2:", signByte2)
+
 	signList = append(signList, signByte2)
 
 	newTx := common.NewTxMulSign(client,
@@ -281,46 +280,38 @@ func BuildAndBroadCastMultisigMsg(client client.Context, multiSigPubkey cryptoTy
 
 func (s *MachineServer) handleConfirmOpenChannel(data *structpb.Struct) (*sdk.TxResponse, error) {
 
-	msg := channelTypes.NewMsgOpenChannel(
-		s.channelInfo.Multisig_Addr,
-		s.channelInfo.PartA,
-		s.channelInfo.PartB,
-		&sdk.Coin{
+	msg := channelTypes.MsgOpenChannel{
+		Creator: s.channelInfo.Multisig_Addr,
+		PartA:   s.channelInfo.PartA,
+		PartB:   s.channelInfo.PartB,
+		CoinA: &sdk.Coin{
 			Denom:  s.channelInfo.Denom,
 			Amount: sdk.NewInt(int64(s.channelInfo.Amount_partA)),
 		},
-		&sdk.Coin{
+		CoinB: &sdk.Coin{
 			Denom:  s.channelInfo.Denom,
 			Amount: sdk.NewInt(int64(s.channelInfo.Amount_partB)),
 		},
-		s.channelInfo.Multisig_Addr,
-	)
+		MultisigAddr: s.channelInfo.Multisig_Addr,
+	}
 
 	openChannelRequest := channel.SignMsgRequest{
-		Msg:      msg,
+		Msg:      &msg,
 		GasLimit: 200000,
 		GasPrice: "25aastra",
 	}
 
 	log.Println("openChannelRequest:", openChannelRequest)
-	//log.Printf("multisigaddress: %v\n", s.channelInfo.Multisig_Addr)
-	//peerAccount, err := account.NewPKAccount(s.channelInfo.PubkeyB)
-	//if err != nil {
-	//	log.Println("NewPKAccount Err:", err.Error())
-	//	return nil, err
-	//}
 
 	//@todo create multi account
-	//log.Println("this publickey:", s.thisAccount.PublicKey(), s.thisAccount.PublicKey().String())
-	//log.Println("peer publickey:", peerAccount.PublicKey(), s.thisAccount.PublicKey().String())
-	multisig_addr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), nil, 2)
+	multisig_addr, multiSigPubkey, err := account.NewAccount(60).CreateMulSignAccountFromTwoAccount(s.thisAccount.PublicKey(), s.channelInfo.PubkeyB, 2)
 	if err != nil {
 		s.sendError(err)
 		return nil, err
 	}
 	log.Println("multisig_addr:", multisig_addr)
 
-	strSig1, err := s.cn.SignMultisigMsg(openChannelRequest, s.thisAccount, multiSigPubkey)
+	strSig1, err := channel.NewChannel(s.rpcClient).SignMultisigMsg(openChannelRequest, s.thisAccount, multiSigPubkey)
 	if err != nil {
 		log.Println("SignMultisigTxFromOneAccount Err:", err.Error())
 		return nil, err
